@@ -1,4 +1,4 @@
-# Fine-tuned LLM model for Directional Sentiment Analysis
+# Fine-tuned LLM model for Directional Sentiment Analysis using `mlx-lm`
 
 ## Overview
 
