@@ -21,6 +21,7 @@ Apple's stock shot up while its peer were down for overspending concerns.
 
 For these opposite polarities, the model (either deterministic or statistical) might not be able extract the proper sentiment per entity.
 
+
 ### Approaches
 
 The model is trained to output in the following format (based on the extracted entities, the number of `dict` grows).
@@ -38,13 +39,16 @@ Here, the polarity is defined as below.
 
 While this definition itself isn't special, fine-tuning sentences with juxtaposed clauses proved it to work.
 
+
 ## Requirements
 
 Needless to say, since [`mlx-lm`](https://github.com/ml-explore/mlx-lm) is developed and optimized for the Apple Silicon devices (e.g., Macbook Air M1), the whole code in this repo is only applicable for Apple Silicon.
 
 Additionally, it is assumed that [`uv`](https://docs.astral.sh/uv/) has been installed.
 
+
 ## File structures
+
 
 ### Training Preparation
 
@@ -61,7 +65,8 @@ Usage:
 uv run python sentiment_prep.py
 ```
 
-This will create the `training.jsonl` and `valid.jsonl` datasets within the `data\` directory.
+This will create the `training.jsonl` and `valid.jsonl` datasets within the `data/` directory.
+
 
 ### Training
 
@@ -72,6 +77,7 @@ Usage:
 ```
 uv run python sentiment_training.py
 ```
+
 
 ### Inference
 
