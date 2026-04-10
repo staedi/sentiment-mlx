@@ -1,0 +1,49 @@
+# LoRA fine-tuning config for directed financial sentiment extraction
+# Model: Llama 3.1 8B (4-bit quantised) | Hardware: M1 16 GB
+
+model: mlx-community/Meta-Llama-3.1-8B-Instruct-4bit #mlx-community/gemma-3-4b-it-4bit #"meta-llama/llama-3.2-3B-Instruct"
+train: true
+fine_tune_type: lora
+
+# Data
+data: data                        # directory containing train.jsonl / valid.jsonl
+
+# Reproducibility
+seed: 42
+
+# LoRA layers — 16 is a good balance of capacity vs. memory on 16 GB
+num_layers: 16
+
+# Training
+batch_size: 2                     # conservative for Llama 8B on 16 GB
+iters: 500                        # ~3.1 epochs over 520 samples at batch_size=2
+learning_rate: 1.0e-5             # conservative, matches coref setting; 1e-4 risks overshooting
+grad_checkpoint: true             # essential on 16 GB
+
+# Sequence length — financial news sentences are short; 512 sufficient and saves memory
+max_seq_length: 512
+
+# Evaluation & checkpointing
+val_batches: 25
+steps_per_report: 10
+steps_per_eval: 100
+save_every: 100
+test: false
+test_batches: 100
+
+# Adapter output
+adapter_path: adapters_sentiment
+
+# LoRA hyper-parameters
+# q_proj + v_proj: standard minimal set
+# k_proj + o_proj: added for better quality on nuanced polarity reasoning
+# at modest extra memory cost
+lora_parameters:
+  keys:
+    - self_attn.q_proj
+    - self_attn.k_proj
+    - self_attn.v_proj
+    - self_attn.o_proj
+  rank: 8
+  scale: 20.0
+  dropout: 0.05
