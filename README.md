@@ -2,7 +2,7 @@
 
 ## Overview
 
-This is to fine-tune open LLMs (e.g., `Llama` family) using [`mlx-lm`](https://github.com/ml-explore/mlx-lm) for Directional Sentiment Analysis.
+This is to fine-tune open LLMs (e.g., `gemma` family) using [`mlx-lm`](https://github.com/ml-explore/mlx-lm) for Directional Sentiment Analysis.
 
 
 ### Directional Sentiment Analysis
@@ -11,15 +11,15 @@ Originally laid out in [rel_annotate](https://github.com/staedi/rel_annotate), *
 
 Specifically, most of the sentiment analysis model, at least at the time of that writing was focused on the overall sentiment of the text or sentences.
 
-What they struggled was to extract the sentiment when the text contains multiple entities (many times it does) with dissimilar sentiment polarity.
+What they struggled was to extract the sentiment when the text contains multiple entities (many times it does) with dissimilar sentiment polarities.
 
 For instance, the following sentence might not well be analyzed.
 
 ```
-Apple's stock shot up while its peer were down for overspending concerns.
+Apple's stock shot up while its peers' were down due to overspending concerns.
 ```
 
-For these opposite polarities, the model (either deterministic or statistical) might not be able extract the proper sentiment per entity.
+For these opposite polarities, the model (either deterministic or statistical) might not be able to extract the proper sentiment per entity.
 
 
 ### Approaches
@@ -27,17 +27,24 @@ For these opposite polarities, the model (either deterministic or statistical) m
 The model is trained to output in the following format (based on the extracted entities, the number of `dict` grows).
 
 ```
-[{"entity": "...", "polarity": "+ / - / 0 / ~", "category": "Legal / Business / Performance /Recruitment / NewsRelease / Bankruptcy"},]
+[{"entity": "...", "entity_type": "ORG / PERSON / GPE / OTHER", "polarity": "+ / - / 0 / ~", "category": "Legal / Business / Performance / Recruitment / NewsRelease / Bankruptcy"},]
 ```
 
-Here, the polarity is defined as below.
+Here, `entity_type`, as it can be deduced easily by available values, means NER (Named Entity Recognition).
+
+* `ORG`: Companies or organizations
+* `PERSON`: (Need explanation?)
+* `GPE`: Geo-political Entity, i.e., counties, cities and regions
+* `OTHER`: Not belonging to the above
+
+The `polarity` is defined as below.
 
 * `+`: Positive sentiment
 * `-`: Negative sentiment
 * `0`: Neutral sentiment 
 * `~`: Ambiguous sentiment to decide
 
-While this definition itself isn't special, fine-tuning sentences with juxtaposed clauses proved it to work.
+While this definition itself isn't special, fine-tuning sentences with juxtaposed clauses showed promising results.
 
 
 ## Requirements
@@ -81,21 +88,22 @@ uv run python sentiment_training.py
 
 ### Inference
 
-Usage script from the fine-tuned model repo ([sentiment-llama-3.2](https://huggingface.co/staedi/sentiment-llama-3.2)).
+Usage script from the fine-tuned model repo ([sentiment-gemma-3](https://huggingface.co/staedi/sentiment-gemma-3)).
 
 ```
 from mlx_lm import load, generate
 
-model, tokenizer = load("staedi/sentiment-llama-3.2")
+model, tokenizer = load("staedi/sentiment-gemma-3")
 
 prompt = (
     "You are a financial analyst specializing in directed sentiment extraction. "
     "Given a financial news text, identify all mentioned entities and determine "
     "the sentiment directed toward each one. Return your answer as a JSON array "
-    "where each element has: \"entity\" (name), \"polarity\" (+ positive, - negative, "
-    "0 neutral, ~ context-dependent), and \"category\" (one of: Legal, Business, "
-    "Performance, Recruitment, NewsRelease, Bankruptcy).\n\n"
-    "Valid polarities: \"+\", \"-\", \"0\", \"~\"\n"
+    "where each element has: \"entity\" (name), \"entity_type\" (\"ORG\" for "
+    "companies/organizations, \"PERSON\" for individuals, \"GPE\" for countries/"
+    "cities/regions, \"OTHER\" for anything else), \"polarity\" (+ positive, "
+    "- negative, 0 neutral, ~ context-dependent), and \"category\" (one of: Legal, "
+    "Business, Performance, Recruitment, NewsRelease, Bankruptcy)."
 )
 
 text = "Apple announced its earnings. The company performed well."

@@ -6,6 +6,7 @@ Data preparation for directed financial sentiment extraction using MLX-LM
 import os
 import json
 import random
+from datetime import date
 import yaml
 import argparse
 from typing import List, Dict
@@ -39,9 +40,11 @@ class SentimentDataProcessor:
             "You are a financial analyst specializing in directed sentiment extraction. "
             "Given a financial news text, identify all mentioned entities and determine "
             "the sentiment directed toward each one. Return your answer as a JSON array "
-            "where each element has: \"entity\" (name), \"polarity\" (+ positive, - negative, "
-            "0 neutral, ~ context-dependent), and \"category\" (one of: Legal, Business, "
-            "Performance, Recruitment, NewsRelease, Bankruptcy)."
+            "where each element has: \"entity\" (name), \"entity_type\" (\"ORG\" for "
+            "companies/organizations, \"PERSON\" for individuals, \"GPE\" for countries/"
+            "cities/regions, \"OTHER\" for anything else), \"polarity\" (+ positive, "
+            "- negative, 0 neutral, ~ context-dependent), and \"category\" (one of: Legal, "
+            "Business, Performance, Recruitment, NewsRelease, Bankruptcy)."
         )
 
         self.seed = seed
@@ -102,8 +105,25 @@ class SentimentDataProcessor:
         return train_path, valid_path
 
 
+BATCH_SIZE    = 2      # Minibatch size (conservative for Llama/Qwen/Gemma 4-8B on 16 GB)
+TARGET_EPOCHS = 4.5     # Default epoch target when --iters isn't explicitly set — see
+                         # compute_iters(). 500 was a static default that went stale as
+                         # the dataset grew (705 -> 767 examples) without iters moving
+                         # with it, which undertrained the last fine-tuning round.
+
+
+def compute_iters(n_train: int, batch_size: int = BATCH_SIZE, target_epochs: float = TARGET_EPOCHS) -> int:
+    """Iterations needed to see the training set ~target_epochs times."""
+    steps_per_epoch = max(1, n_train // batch_size)
+    return int(steps_per_epoch * target_epochs)
+
+
 def create_training_config(model_name:str="mlx-community/Llama-3.2-3B-Instruct-4bit", iters:int=500, learning_rate:float=1e-5):
     """Create training configuration for MLX-LM"""
+
+    model_full = model_name[model_name.find('/')+1:]
+    model_alias = model_full[:model_full.find('-')]
+
     config = {
         "model": model_name,  # The path to the local model directory or Hugging Face repo
         "train": True,  # Whether or not to train (boolean)
@@ -111,7 +131,7 @@ def create_training_config(model_name:str="mlx-community/Llama-3.2-3B-Instruct-4
         "data": "data",  # Directory with {train, valid, test}.jsonl files
         "seed": 42,   # The PRNG seed
         "num_layers": 16,  # Number of layers to fine-tune (16 is a good balance of capacity vs. memory on 16 GB)
-        "batch_size": 2, # Minibatch size (conservative for Llama 8B on 16 GB)
+        "batch_size": BATCH_SIZE,
         "iters": iters,  # Iterations to train for
         "val_batches": 25,   # Number of validation batches, -1 uses the entire validation set
         "learning_rate": learning_rate, # Adam learning rate
@@ -119,7 +139,7 @@ def create_training_config(model_name:str="mlx-community/Llama-3.2-3B-Instruct-4
         "steps_per_report": 10, # Number of training steps between loss reporting
         "steps_per_eval": 100,  # Number of training steps between validations
         # "resume_adapter_file": None,  # Load path to resume training with the given adapter weights
-        "adapter_path": "adapters", # Save/load path for the trained adapter weights
+        "adapter_path": f"adapters_{model_alias.lower()}_{date.today().strftime('%Y%m%d')}", # Save/load path for the trained adapter weights
         "save_every": 100,  # Save the model every N iterations
         "test": False,  # Evaluate on the test set after training
         "test_batches": 100,    # Number of test set batches, -1 uses the entire test set
@@ -178,11 +198,14 @@ def main():
     # )
     parser.add_argument(
         "--iters",
-        default=500,
-        help="Training iterations"
+        type=int,
+        default=None,
+        help=f"Training iterations. Default: computed from dataset size to target "
+             f"~{TARGET_EPOCHS} epochs (see compute_iters()) — pass explicitly to override.",
     )
     parser.add_argument(
         "--learning_rate",
+        type=float,
         default=1e-5,
         help="Training learning rate"
     )
@@ -205,9 +228,16 @@ def main():
 
     train_path, valid_path = processor.save_for_mlx_training(output_dir=args.output_dir, split=args.split)
 
+    # iters: explicit --iters always wins; otherwise scale with the actual train
+    # split size so it doesn't go stale as the dataset grows (see compute_iters()).
+    n_train = int(len(processor.records) * args.split)
+    iters = args.iters if args.iters is not None else compute_iters(n_train)
+    print(f"Training iterations: {iters}"
+          + ("" if args.iters is not None else f" (computed for ~{TARGET_EPOCHS} epochs over {n_train} train samples)"))
+
     # Create training configuration
     print("Creating training configuration...")
-    config = create_training_config(model_name=args.model_name, iters=args.iters, learning_rate=args.learning_rate)
+    config = create_training_config(model_name=args.model_name, iters=iters, learning_rate=args.learning_rate)
 
     print("\n" + "="*50)
     print("SETUP COMPLETE!")

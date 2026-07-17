@@ -16,7 +16,7 @@ num_layers: 16
 
 # Training
 batch_size: 2                     # conservative for Llama 8B on 16 GB
-iters: 500                        # ~3.1 epochs over 520 samples at batch_size=2
+iters: 1400                       # ~4.6 epochs over ~613 train samples at batch_size=2 (was 500 / ~1.7 epochs — undertrained after the entity_type + citation-exclusion data additions)
 learning_rate: 1.0e-5             # conservative, matches coref setting; 1e-4 risks overshooting
 grad_checkpoint: true             # essential on 16 GB
 

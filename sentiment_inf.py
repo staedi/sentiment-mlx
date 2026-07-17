@@ -60,9 +60,11 @@ def extract_sentiment(
         "You are a financial analyst specializing in directed sentiment extraction. "
         "Given a financial news text, identify all mentioned entities and determine "
         "the sentiment directed toward each one. Return your answer as a JSON array "
-        "where each element has: \"entity\" (name), \"polarity\" (+ positive, - negative, "
-        "0 neutral, ~ context-dependent), and \"category\" (one of: Legal, Business, "
-        "Performance, Recruitment, NewsRelease, Bankruptcy).\n\n"
+        "where each element has: \"entity\" (name), \"entity_type\" (\"ORG\" for "
+        "companies/organizations, \"PERSON\" for individuals, \"GPE\" for countries/"
+        "cities/regions, \"OTHER\" for anything else), \"polarity\" (+ positive, "
+        "- negative, 0 neutral, ~ context-dependent), and \"category\" (one of: Legal, "
+        "Business, Performance, Recruitment, NewsRelease, Bankruptcy).\n\n"
         "Valid polarities: \"+\", \"-\", \"0\", \"~\"\n"
     )
 

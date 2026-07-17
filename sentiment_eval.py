@@ -86,26 +86,49 @@ from mlx_lm import load, generate
 
 def extract_json(raw: str) -> list:
     """Parse a JSON array from model output, stripping markdown fences if present."""
-    # Strip markdown code fences (```json ... ``` or ``` ... ```)
-    cleaned = re.sub(r"```(?:json)?\s*", "", raw).strip()
-    cleaned = cleaned.rstrip("`").strip()
+    # # Strip markdown code fences (```json ... ``` or ``` ... ```)
+    # cleaned = re.sub(r"```(?:json)?\s*", "", raw).strip()
+    # cleaned = cleaned.rstrip("`").strip()
 
-    # Find the first '[' and last ']' to isolate the array
-    start = cleaned.find("[")
-    end = cleaned.rfind("]")
+    # # Find the first '[' and last ']' to isolate the array
+    # start = cleaned.find("[")
+    # end = cleaned.rfind("]")
 
-    if start == -1 or end == -1:
-        raise ValueError(f"No JSON array found in model output:\n{raw}")
+    # if start == -1 or end == -1:
+    #     raise ValueError(f"No JSON array found in model output:\n{raw}")
 
-    candidate = cleaned[start : end + 1]
+    # candidate = cleaned[start : end + 1]
 
-    # Fix trailing commas before ] or } (common LLM output issue)
-    candidate = re.sub(r",\s*([\]}])", r"\1", candidate)
+    # # Fix trailing commas before ] or } (common LLM output issue)
+    # candidate = re.sub(r",\s*([\]}])", r"\1", candidate)
 
-    try:
-        return json.loads(candidate)
-    except json.JSONDecodeError as e:
-        raise ValueError(f"Failed to parse JSON from model output:\n{raw}\n\nExtracted candidate:\n{candidate}\n\nError: {e}") from e
+    # try:
+    #     return json.loads(candidate)
+    # except json.JSONDecodeError as e:
+    #     raise ValueError(f"Failed to parse JSON from model output:\n{raw}\n\nExtracted candidate:\n{candidate}\n\nError: {e}") from e
+
+    # Strip markdown fences
+    raw = re.sub(r"```(?:json)?", "", raw).strip()
+    
+    # Try standard JSON array first
+    match = re.search(r"\[.*\]", raw, re.DOTALL)
+    if match:
+        try:
+            data = json.loads(match.group())
+            return data if isinstance(data, list) else []
+        except json.JSONDecodeError:
+            pass
+    
+    # Fallback: try parsing newline-delimited JSON objects
+    results = []
+    for line in raw.splitlines():
+        line = line.strip()
+        if line.startswith("{") and line.endswith("}"):
+            try:
+                results.append(json.loads(line))
+            except json.JSONDecodeError:
+                continue
+    return results
 
 
 def extract_entities(model, tokenizer, text: str, max_tokens) -> list[dict]:
@@ -115,9 +138,11 @@ def extract_entities(model, tokenizer, text: str, max_tokens) -> list[dict]:
         "You are a financial analyst specializing in directed sentiment extraction. "
         "Given a financial news text, identify all mentioned entities and determine "
         "the sentiment directed toward each one. Return your answer as a JSON array "
-        "where each element has: \"entity\" (name), \"polarity\" (+ positive, - negative, "
-        "0 neutral, ~ context-dependent), and \"category\" (one of: Legal, Business, "
-        "Performance, Recruitment, NewsRelease, Bankruptcy).\n\n"
+        "where each element has: \"entity\" (name), \"entity_type\" (\"ORG\" for "
+        "companies/organizations, \"PERSON\" for individuals, \"GPE\" for countries/"
+        "cities/regions, \"OTHER\" for anything else), \"polarity\" (+ positive, "
+        "- negative, 0 neutral, ~ context-dependent), and \"category\" (one of: Legal, "
+        "Business, Performance, Recruitment, NewsRelease, Bankruptcy).\n\n"
         "Valid polarities: \"+\", \"-\", \"0\", \"~\"\n"
     )
 
@@ -185,11 +210,23 @@ def compare(predicted: list[dict], ground_truth: list[dict]) -> dict:
     )
     polarity_total = tp  # only count entity matches
 
+    # entity_type accuracy — same matched-entity-pairs basis as polarity.
+    # gt_map[k] may lack "entity_type" for older records; .get() keeps
+    # those from being scored rather than crashing.
+    entity_type_correct = sum(
+        1 for k in gt_map
+        if k in pred_map
+        and gt_map[k].get("entity_type") is not None
+        and gt_map[k].get("entity_type") == pred_map[k].get("entity_type")
+    )
+    entity_type_total = sum(1 for k in gt_map if k in pred_map and gt_map[k].get("entity_type") is not None)
+
     precision = tp / (tp + fp) if tp + fp else 0.0
     recall    = tp / (tp + fn) if tp + fn else 0.0
     f1        = (2 * precision * recall / (precision + recall)
                  if precision + recall else 0.0)
     pol_acc   = polarity_correct / polarity_total if polarity_total else 0.0
+    etype_acc = entity_type_correct / entity_type_total if entity_type_total else 0.0
 
     return dict(
         tp=tp, fp=fp, fn=fn,
@@ -197,20 +234,24 @@ def compare(predicted: list[dict], ground_truth: list[dict]) -> dict:
         polarity_correct=polarity_correct,
         polarity_total=polarity_total,
         polarity_accuracy=pol_acc,
+        entity_type_correct=entity_type_correct,
+        entity_type_total=entity_type_total,
+        entity_type_accuracy=etype_acc,
     )
 
 
 # ---------------------------------------------------------------------------
 # Pretty print helpers
 # ---------------------------------------------------------------------------
-def _row(polarity: str, entity: str, ticker, category: str) -> str:
+def _row(polarity: str, entity: str, ticker, category: str, entity_type=None) -> str:
     t = ticker or "N/A"
-    return f"  [{polarity:1s}] {entity:<42s} ({t:<12s}) [{category}]"
+    et = f" <{entity_type}>" if entity_type else ""
+    return f"  [{polarity:1s}] {entity:<42s} ({t:<12s}) [{category}]{et}"
 
 
 def _print_extractions(extractions: list[dict]) -> None:
     for e in extractions:
-        print(_row(e["polarity"], e["entity"], e.get("ticker"), e["category"]))
+        print(_row(e["polarity"], e["entity"], e.get("ticker"), e["category"], e.get("entity_type")))
 
 
 # ---------------------------------------------------------------------------
@@ -268,7 +309,8 @@ def main() -> None:
     # model, tokenizer = load(MODEL) #, adapter_path=ADAPTER_PATH)
     # print("Model loaded.\n")
 
-    totals  = dict(tp=0, fp=0, fn=0, polarity_correct=0, polarity_total=0)
+    totals  = dict(tp=0, fp=0, fn=0, polarity_correct=0, polarity_total=0,
+                   entity_type_correct=0, entity_type_total=0)
     correct_records = 0  # records where every entity + polarity is perfect
 
     for i, record in enumerate(records, 1):
@@ -288,10 +330,12 @@ def main() -> None:
         _print_extractions(predicted)
 
         m = compare(predicted, gt)
-        for k in ("tp", "fp", "fn", "polarity_correct", "polarity_total"):
+        for k in ("tp", "fp", "fn", "polarity_correct", "polarity_total",
+                   "entity_type_correct", "entity_type_total"):
             totals[k] += m[k]
 
-        if m["fp"] == 0 and m["fn"] == 0 and m["polarity_accuracy"] == 1.0:
+        if (m["fp"] == 0 and m["fn"] == 0 and m["polarity_accuracy"] == 1.0
+                and (m["entity_type_total"] == 0 or m["entity_type_accuracy"] == 1.0)):
             correct_records += 1
             perfect = " ✓"
         else:
@@ -301,7 +345,9 @@ def main() -> None:
             f"\nRecord: P={m['precision']:.0%}  R={m['recall']:.0%}  "
             f"F1={m['f1']:.0%}  "
             f"Polarity={m['polarity_accuracy']:.0%} "
-            f"({m['polarity_correct']}/{m['polarity_total']} matched){perfect}"
+            f"({m['polarity_correct']}/{m['polarity_total']} matched)  "
+            f"EntityType={m['entity_type_accuracy']:.0%} "
+            f"({m['entity_type_correct']}/{m['entity_type_total']} matched){perfect}"
         )
         print("-" * 80)
 
@@ -312,6 +358,8 @@ def main() -> None:
     f1   = 2 * prec * rec / (prec + rec) if prec + rec else 0.0
     pol_acc = (totals["polarity_correct"] / totals["polarity_total"]
                if totals["polarity_total"] else 0.0)
+    etype_acc = (totals["entity_type_correct"] / totals["entity_type_total"]
+                 if totals["entity_type_total"] else 0.0)
 
     print(f"\n{'=' * 80}")
     print("OVERALL ACCURACY REPORT")
@@ -323,8 +371,11 @@ def main() -> None:
     print(f"Entity Recall     :  {rec:.1%}  ({tp} TP, {fn} FN)")
     print(f"Entity F1         :  {f1:.1%}")
     print()
-    print(f"Polarity Accuracy :  {pol_acc:.1%}  "
+    print(f"Polarity Accuracy   :  {pol_acc:.1%}  "
           f"({totals['polarity_correct']}/{totals['polarity_total']} "
+          f"matched-entity pairs)")
+    print(f"Entity Type Accuracy:  {etype_acc:.1%}  "
+          f"({totals['entity_type_correct']}/{totals['entity_type_total']} "
           f"matched-entity pairs)")
     print(f"{'=' * 80}")
 
